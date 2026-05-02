@@ -1725,6 +1725,22 @@ export function agentRoutes(db: Db) {
       if (changingInstructionsPath) {
         await assertCanManageInstructionsPath(req, existing);
       }
+      // Prevent agents from modifying the model field in their own adapterConfig.
+      // Model selection is an infrastructure decision — only board users and CEO agents
+      // may change it. Without this guard, agents can self-PATCH their model causing drift.
+      if (Object.prototype.hasOwnProperty.call(adapterConfig, "model")) {
+        const isBoardActor = req.actor.type === "board";
+        const actorAgentId = req.actor.agentId ?? null;
+        let isCeoActor = false;
+        if (!isBoardActor && actorAgentId) {
+          const actorAgent = await svc.getById(actorAgentId);
+          isCeoActor = actorAgent?.role === "ceo";
+        }
+        if (!isBoardActor && !isCeoActor) {
+          res.status(403).json({ error: "Agents cannot modify their own model. Contact a board user or CEO." });
+          return;
+        }
+      }
       patchData.adapterConfig = adapterConfig;
     }
 
