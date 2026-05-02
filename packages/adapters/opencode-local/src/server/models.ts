@@ -21,7 +21,10 @@ function resolveOpenCodeCommand(input: unknown): string {
 
 const discoveryCache = new Map<string, { expiresAt: number; models: AdapterModel[] }>();
 const VOLATILE_ENV_KEY_PREFIXES = ["PAPERCLIP_", "npm_", "NPM_"] as const;
-const VOLATILE_ENV_KEY_EXACT = new Set(["PWD", "OLDPWD", "SHLVL", "_", "TERM_SESSION_ID", "HOME"]);
+// XDG_CONFIG_HOME is excluded because prepareOpenCodeRuntimeConfig sets it to a unique temp
+// directory on every run, which would bypass the 5-minute cache entirely. Provider API key
+// discovery is unaffected by XDG_CONFIG_HOME (keys come from XDG_DATA_HOME / the OpenCode DB).
+const VOLATILE_ENV_KEY_EXACT = new Set(["PWD", "OLDPWD", "SHLVL", "_", "TERM_SESSION_ID", "HOME", "XDG_CONFIG_HOME"]);
 
 function dedupeModels(models: AdapterModel[]): AdapterModel[] {
   const seen = new Set<string>();
