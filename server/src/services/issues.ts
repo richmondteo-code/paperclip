@@ -1281,7 +1281,12 @@ export function issueService(db: Db) {
       });
     },
 
-    release: async (id: string, actorAgentId?: string, actorRunId?: string | null) => {
+    release: async (
+      id: string,
+      actorAgentId?: string,
+      actorRunId?: string | null,
+      options?: { managerRelease?: boolean },
+    ) => {
       const existing = await db
         .select()
         .from(issues)
@@ -1289,6 +1294,28 @@ export function issueService(db: Db) {
         .then((rows) => rows[0] ?? null);
 
       if (!existing) return null;
+
+      if (options?.managerRelease) {
+        if (!existing.executionRunId && !existing.checkoutRunId) {
+          const [enriched] = await withIssueLabels(db, [existing]);
+          return enriched;
+        }
+        const updated = await db
+          .update(issues)
+          .set({
+            executionRunId: null,
+            executionLockedAt: null,
+            checkoutRunId: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(issues.id, id))
+          .returning()
+          .then((rows) => rows[0] ?? null);
+        if (!updated) return null;
+        const [enriched] = await withIssueLabels(db, [updated]);
+        return enriched;
+      }
+
       if (actorAgentId && existing.assigneeAgentId && existing.assigneeAgentId !== actorAgentId) {
         throw conflict("Only assignee can release issue");
       }

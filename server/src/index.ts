@@ -568,9 +568,11 @@ export async function startServer(): Promise<StartedServer> {
   
     // Reap orphaned running runs at startup while in-memory execution state is empty,
     // then resume any persisted queued runs that were waiting on the previous process.
+    // Also check agent monitoring coverage on startup.
     void heartbeat
       .reapOrphanedRuns()
       .then(() => heartbeat.resumeQueuedRuns())
+      .then(() => heartbeat.checkMonitoringCoverage())
       .catch((err) => {
         logger.error({ err }, "startup heartbeat recovery failed");
       });
@@ -606,6 +608,15 @@ export async function startServer(): Promise<StartedServer> {
           logger.error({ err }, "periodic heartbeat recovery failed");
         });
     }, config.heartbeatSchedulerIntervalMs);
+
+    // Periodically check monitoring coverage every 6 hours
+    setInterval(() => {
+      void heartbeat
+        .checkMonitoringCoverage()
+        .catch((err) => {
+          logger.error({ err }, "monitoring coverage check failed");
+        });
+    }, 6 * 60 * 60 * 1000);
   }
   
   if (config.databaseBackupEnabled) {

@@ -283,10 +283,13 @@ export function IssueDetail() {
     return (linkedRuns ?? []).filter((r) => !liveIds.has(r.runId));
   }, [linkedRuns, liveRuns, activeRun]);
 
-  const { data: allIssues } = useQuery({
-    queryKey: queryKeys.issues.list(selectedCompanyId!),
-    queryFn: () => issuesApi.list(selectedCompanyId!),
-    enabled: !!selectedCompanyId,
+  const { data: childIssues } = useQuery({
+    queryKey: queryKeys.issues.children(issueId!),
+    queryFn: async () => {
+      const data = await issuesApi.list(selectedCompanyId!, { parentId: issueId! });
+      return [...data].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    },
+    enabled: !!issueId && !!selectedCompanyId,
   });
 
   const { data: agents } = useQuery({
@@ -358,13 +361,6 @@ export function IssueDetail() {
     }
     return options;
   }, [agents, orderedProjects]);
-
-  const childIssues = useMemo(() => {
-    if (!allIssues || !issue) return [];
-    return allIssues
-      .filter((i) => i.parentId === issue.id)
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  }, [allIssues, issue]);
 
   const commentReassignOptions = useMemo(() => {
     const options: Array<{ id: string; label: string; searchText?: string }> = [];

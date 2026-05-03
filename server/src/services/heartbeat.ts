@@ -11,6 +11,7 @@ import {
   agentRuntimeState,
   agentTaskSessions,
   agentWakeupRequests,
+  companies,
   heartbeatRunEvents,
   heartbeatRuns,
   issues,
@@ -3675,6 +3676,102 @@ export function heartbeatService(db: Db) {
     await cancelPendingWakeupsForBudgetScope(scope);
   }
 
+  async function checkMonitoringCoverage() {
+    try {
+      // Get all companies
+      const companyRows = await db.select({ id: companies.id }).from(companies);
+
+      for (const company of companyRows) {
+        // Get all active agents in this company
+        const allAgents = await db
+          .select({
+            id: agents.id,
+            name: agents.name,
+            reportsTo: agents.reportsTo,
+            status: agents.status,
+          })
+          .from(agents)
+          .where(eq(agents.companyId, company.id));
+
+        // Identify orphaned agents (those with null reportsTo that are not the CEO)
+        const activeAgents = allAgents.filter((a) => a.status !== "terminated");
+        const orphanedAgents = [];
+
+        for (const agent of activeAgents) {
+          if (agent.reportsTo === null) {
+            // Only flag as orphan if there are multiple active agents (otherwise single agent is the root)
+            if (activeAgents.length > 1) {
+              orphanedAgents.push(agent);
+            }
+          }
+        }
+
+        // Log the coverage check results
+        const logMessage = `Monitoring coverage check for company ${company.id}: found ${activeAgents.length} active agents, ${orphanedAgents.length} orphaned`;
+        logger.info(logMessage);
+
+        // Create warning issue if there are orphaned agents
+        if (orphanedAgents.length > 0) {
+          // Check if there's already an active warning issue for this company
+          const existingWarning = await db
+            .select({ id: issues.id })
+            .from(issues)
+            .where(
+              and(
+                eq(issues.companyId, company.id),
+                eq(issues.originKind, "monitoring_coverage_check"),
+                inArray(issues.status, ["todo", "in_progress"]),
+              ),
+            )
+            .then((rows) => rows[0] ?? null);
+
+          if (!existingWarning) {
+            // Find the CEO of the company to assign the warning issue
+            const ceoAgent = activeAgents.find((a) => a.reportsTo === null);
+
+            // Build the warning issue description
+            const orphanDescriptions = orphanedAgents
+              .map((a) => `- **${a.name}** (${a.id}): no monitor assigned`)
+              .join("\n");
+
+            const issueDescription = `## Monitoring Coverage Alert
+
+The following agents lack assigned run health monitors:
+
+${orphanDescriptions}
+
+**Action Required:** Ensure each agent has a \`reportsTo\` value set to their manager. Agents without monitors cannot escalate stale runs.
+
+**Coverage Check Time:** ${new Date().toISOString()}`;
+
+            try {
+              // Use the issue service to create warning issue
+              await issuesSvc.create(company.id, {
+                title: "Agent Monitoring Coverage Check — Orphaned Agents Detected",
+                description: issueDescription,
+                status: "todo",
+                priority: "high",
+                assigneeAgentId: ceoAgent?.id ?? null,
+                originKind: "monitoring_coverage_check",
+              });
+
+              logger.info(
+                `Created monitoring coverage warning issue for company ${company.id} with ${orphanedAgents.length} orphaned agents`,
+              );
+            } catch (error) {
+              logger.error(
+                { err: error, companyId: company.id },
+                "Failed to create monitoring coverage warning issue",
+              );
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.error({ err: error }, "Monitoring coverage check failed");
+    }
+  }
+
   return {
     list: async (companyId: string, agentId?: string, limit?: number) => {
       const query = db
@@ -3889,5 +3986,7 @@ export function heartbeatService(db: Db) {
         .limit(1);
       return run ?? null;
     },
+
+    checkMonitoringCoverage,
   };
 }

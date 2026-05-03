@@ -1213,7 +1213,39 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
     assertCompanyAccess(req, existing.companyId);
-    if (!(await assertAgentRunCheckoutOwnership(req, res, existing))) return;
+
+    const reason =
+      req.body && typeof req.body === "object" && "reason" in req.body && typeof req.body.reason === "string"
+        ? (req.body.reason as string).trim() || undefined
+        : undefined;
+
+    let managerRelease = false;
+    if (req.actor.type === "agent" && existing.assigneeAgentId && req.actor.agentId) {
+      const actorAgentId = req.actor.agentId;
+      if (actorAgentId === existing.assigneeAgentId) {
+        if (!(await assertAgentRunCheckoutOwnership(req, res, existing))) return;
+      } else {
+        const actorAgent = await agentsSvc.getById(actorAgentId);
+        if (!actorAgent || actorAgent.companyId !== existing.companyId) {
+          res.status(403).json({ error: "NOT_IN_CHAIN_OF_COMMAND" });
+          return;
+        }
+        const isCeo = actorAgent.role === "ceo";
+        let isInChain = false;
+        if (!isCeo) {
+          const chain = await agentsSvc.getChainOfCommand(existing.assigneeAgentId);
+          isInChain = chain.some((m) => m.id === actorAgentId);
+        }
+        if (!isCeo && !isInChain) {
+          res.status(403).json({ error: "NOT_IN_CHAIN_OF_COMMAND" });
+          return;
+        }
+        managerRelease = true;
+      }
+    } else if (req.actor.type !== "board") {
+      if (!(await assertAgentRunCheckoutOwnership(req, res, existing))) return;
+    }
+
     const actorRunId = requireAgentRunId(req, res);
     if (req.actor.type === "agent" && !actorRunId) return;
 
@@ -1221,6 +1253,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
       id,
       req.actor.type === "agent" ? req.actor.agentId : undefined,
       actorRunId,
+      { managerRelease },
     );
     if (!released) {
       res.status(404).json({ error: "Issue not found" });
@@ -1237,7 +1270,22 @@ export function issueRoutes(db: Db, storage: StorageService) {
       action: "issue.released",
       entityType: "issue",
       entityId: released.id,
+      details: reason ? { reason } : undefined,
     });
+
+    if (managerRelease && existing.executionRunId) {
+      await logActivity(db, {
+        companyId: released.companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: "run.released",
+        entityType: "run",
+        entityId: existing.executionRunId,
+        details: reason ? { reason } : undefined,
+      });
+    }
 
     res.json(released);
   });

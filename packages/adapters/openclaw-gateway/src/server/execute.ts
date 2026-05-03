@@ -323,6 +323,13 @@ function buildPaperclipEnvForWake(ctx: AdapterExecutionContext, wakePayload: Wak
   if (paperclipApiUrlOverride) {
     paperclipEnv.PAPERCLIP_API_URL = paperclipApiUrlOverride;
   }
+  // Inject the run-scoped agent JWT so the agent uses its own identity, not a shared
+  // board-user token loaded from disk. Without this, all openclaw_gateway agents sharing
+  // the same OpenClaw instance would read the same claimed-api-key file and post as
+  // authorUserId "local-board" instead of their own agentId.
+  if (ctx.authToken) {
+    paperclipEnv.PAPERCLIP_API_KEY = ctx.authToken;
+  }
   if (wakePayload.taskId) paperclipEnv.PAPERCLIP_TASK_ID = wakePayload.taskId;
   if (wakePayload.wakeReason) paperclipEnv.PAPERCLIP_WAKE_REASON = wakePayload.wakeReason;
   if (wakePayload.wakeCommentId) paperclipEnv.PAPERCLIP_WAKE_COMMENT_ID = wakePayload.wakeCommentId;
@@ -342,6 +349,7 @@ function buildWakeText(payload: WakePayload, paperclipEnv: Record<string, string
     "PAPERCLIP_AGENT_ID",
     "PAPERCLIP_COMPANY_ID",
     "PAPERCLIP_API_URL",
+    "PAPERCLIP_API_KEY",
     "PAPERCLIP_TASK_ID",
     "PAPERCLIP_WAKE_REASON",
     "PAPERCLIP_WAKE_COMMENT_ID",
@@ -359,6 +367,16 @@ function buildWakeText(payload: WakePayload, paperclipEnv: Record<string, string
 
   const issueIdHint = payload.taskId ?? payload.issueId ?? "";
   const apiBaseHint = paperclipEnv.PAPERCLIP_API_URL ?? "<set PAPERCLIP_API_URL>";
+  const apiKeyInjected = !!paperclipEnv.PAPERCLIP_API_KEY;
+
+  const apiKeyLines: string[] = apiKeyInjected
+    ? []
+    : [
+        `PAPERCLIP_API_KEY=<token from ${claimedApiKeyPath}>`,
+        "",
+        `Load PAPERCLIP_API_KEY from ${claimedApiKeyPath} (the token you saved after claim-api-key).`,
+        "",
+      ];
 
   const lines = [
     "Paperclip wake event for a cloud adapter.",
@@ -367,10 +385,7 @@ function buildWakeText(payload: WakePayload, paperclipEnv: Record<string, string
     "",
     "Set these values in your run context:",
     ...envLines,
-    `PAPERCLIP_API_KEY=<token from ${claimedApiKeyPath}>`,
-    "",
-    `Load PAPERCLIP_API_KEY from ${claimedApiKeyPath} (the token you saved after claim-api-key).`,
-    "",
+    ...apiKeyLines,
     `api_base=${apiBaseHint}`,
     `task_id=${payload.taskId ?? ""}`,
     `issue_id=${payload.issueId ?? ""}`,
