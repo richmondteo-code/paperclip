@@ -553,11 +553,19 @@ function deriveTaskKey(
 
 export function shouldResetTaskSessionForWake(
   contextSnapshot: Record<string, unknown> | null | undefined,
+  issueStatus?: string | null,
 ) {
   if (contextSnapshot?.forceFreshSession === true) return true;
 
   const wakeReason = readNonEmptyString(contextSnapshot?.wakeReason);
   if (wakeReason === "issue_assigned") return true;
+
+  // A todo-status issue has not been checked out yet; always start with a
+  // fresh session regardless of what the previous run stored.  This prevents
+  // a stale Gemini session from being retried after an issue is manually reset
+  // to todo (e.g. following a process_lost_retry recovery cycle).
+  if (issueStatus === "todo") return true;
+
   return false;
 }
 
@@ -570,11 +578,15 @@ export function formatRuntimeWorkspaceWarningLog(warning: string) {
 
 function describeSessionResetReason(
   contextSnapshot: Record<string, unknown> | null | undefined,
+  issueStatus?: string | null,
 ) {
   if (contextSnapshot?.forceFreshSession === true) return "forceFreshSession was requested";
 
   const wakeReason = readNonEmptyString(contextSnapshot?.wakeReason);
   if (wakeReason === "issue_assigned") return "wake reason is issue_assigned";
+
+  if (issueStatus === "todo") return "issue status is todo";
+
   return null;
 }
 
@@ -1988,6 +2000,7 @@ export function heartbeatService(db: Db) {
             id: issues.id,
             identifier: issues.identifier,
             title: issues.title,
+            status: issues.status,
             projectId: issues.projectId,
             projectWorkspaceId: issues.projectWorkspaceId,
             executionWorkspaceId: issues.executionWorkspaceId,
@@ -2026,8 +2039,8 @@ export function heartbeatService(db: Db) {
     const taskSession = taskKey
       ? await getTaskSession(agent.companyId, agent.id, agent.adapterType, taskKey)
       : null;
-    const resetTaskSession = shouldResetTaskSessionForWake(context);
-    const sessionResetReason = describeSessionResetReason(context);
+    const resetTaskSession = shouldResetTaskSessionForWake(context, issueContext?.status);
+    const sessionResetReason = describeSessionResetReason(context, issueContext?.status);
     const taskSessionForRun = resetTaskSession ? null : taskSession;
     const explicitResumeSessionParams = normalizeSessionParams(
       sessionCodec.deserialize(parseObject(context.resumeSessionParams)),

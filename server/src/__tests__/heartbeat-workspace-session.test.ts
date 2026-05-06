@@ -182,6 +182,23 @@ describe("shouldResetTaskSessionForWake", () => {
       }),
     ).toBe(false);
   });
+
+  it("resets session when issue is in todo status (e.g. after manual reset)", () => {
+    // A process_lost_retry wake on a todo issue must not resume the stale session.
+    expect(shouldResetTaskSessionForWake({ wakeReason: "process_lost_retry" }, "todo")).toBe(true);
+  });
+
+  it("resets session when issue is in todo status regardless of wake reason", () => {
+    expect(shouldResetTaskSessionForWake({ wakeSource: "timer" }, "todo")).toBe(true);
+  });
+
+  it("does not reset session when issue is in_progress", () => {
+    expect(shouldResetTaskSessionForWake({ wakeReason: "process_lost_retry" }, "in_progress")).toBe(false);
+  });
+
+  it("does not reset session when issueStatus is omitted", () => {
+    expect(shouldResetTaskSessionForWake({ wakeReason: "process_lost_retry" })).toBe(false);
+  });
 });
 
 describe("buildExplicitResumeSessionOverride", () => {
