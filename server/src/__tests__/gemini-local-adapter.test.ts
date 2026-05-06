@@ -77,6 +77,17 @@ describe("gemini_local stale session detection", () => {
     expect(isGeminiUnknownSessionError("", "unknown session id abc")).toBe(true);
     expect(isGeminiUnknownSessionError("", "checkpoint latest not found")).toBe(true);
   });
+
+  it("treats 'Invalid session identifier' errors as an unknown session error", () => {
+    expect(
+      isGeminiUnknownSessionError(
+        "",
+        'Error resuming session: Invalid session identifier "1d0a5c9e-9123-44a1-a62d-7b0af5d13ada"',
+      ),
+    ).toBe(true);
+    expect(isGeminiUnknownSessionError("", "Invalid session identifier abc123")).toBe(true);
+    expect(isGeminiUnknownSessionError("", "error resuming session: some detail")).toBe(true);
+  });
 });
 
 describe("gemini_local ui stdout parser", () => {
